@@ -4,6 +4,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import shutil
+import sys
 
 def compress_videos(input_folder_path):
     input_folder = Path(input_folder_path)
@@ -30,28 +31,62 @@ def compress_videos(input_folder_path):
     for video_file in video_files:
         output_path = output_folder / video_file.name
 
+        original_size = video_file.stat().st_size / (1024 * 1024)  # MB
+
         ffmpeg_cmd = [
             'ffmpeg',
             '-i', str(video_file),
             '-vcodec', 'libx264',
-            '-crf', '28',           # You can lower this (e.g., 23–26) for higher quality
+            '-crf', '28',
             '-preset', 'slow',
             '-acodec', 'aac',
             '-b:a', '128k',
             str(output_path)
         ]
 
-        subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"\nCompressing: {video_file.name}")
+        process = subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, universal_newlines=True)
 
-    messagebox.showinfo("Done", f"Compression complete.\nCompressed videos saved in:\n{output_folder}")
+        # Read FFmpeg stderr for progress
+        total_duration = None
+        for line in process.stderr:
+            if "Duration" in line:
+                # Extract total duration in seconds
+                duration_str = line.strip().split("Duration:")[1].split(",")[0].strip()
+                h, m, s = duration_str.split(":")
+                total_duration = int(h) * 3600 + int(m) * 60 + float(s)
+            if "time=" in line and total_duration:
+                time_str = line.strip().split("time=")[1].split(" ")[0]
+                try:
+                    h, m, s = time_str.split(":")
+                    elapsed = int(h) * 3600 + int(m) * 60 + float(s)
+                    percent = (elapsed / total_duration) * 100
+                    sys.stdout.write(f"\rProgress: {percent:.2f}%")
+                    sys.stdout.flush()
+                except:
+                    pass
+
+        process.wait()
+        print("\nCompression finished.")
+
+        compressed_size = output_path.stat().st_size / (1024 * 1024)  # MB
+        print(f"Original Size: {original_size:.2f} MB → Compressed Size: {compressed_size:.2f} MB")
+
+        messagebox.showinfo(
+            "Compression Complete",
+            f"File: {video_file.name}\n"
+            f"Original Size: {original_size:.2f} MB\n"
+            f"Compressed Size: {compressed_size:.2f} MB\n"
+            f"Saved in:\n{output_folder}"
+        )
 
 def select_folder():
     folder_selected = filedialog.askdirectory(title="Select Folder Containing Videos")
     if folder_selected:
         compress_videos(folder_selected)
 
-# GUI launcher
 if __name__ == "__main__":
     root = tk.Tk()
-    root.withdraw()
-    select_folder()
+    root.withdraw()  # Hide main window
+    root.after(100, select_folder)  # Delay folder dialog until Tkinter starts
+    root.mainloop()
